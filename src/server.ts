@@ -114,41 +114,42 @@ export function createServer(opts: ServerOptions): Server {
   let stateInterval: ReturnType<typeof setInterval> | null = null;
 
   function discoverDevices(ws: WebSocket): void {
-    const devices: { name: string; ip: string }[] = [];
+    const devices = new Map<string, { name: string; ip: string }>();
     const browse = spawn('dns-sd', ['-B', '_wled._tcp', 'local.']);
-    const hostnames: string[] = [];
+    const hostnames = new Set<string>();
 
     browse.stdout.on('data', (data: Buffer) => {
       const lines = data.toString().split('\n');
       for (const line of lines) {
         const match = line.match(/\s+(\S+)\s*$/);
         if (match && !line.includes('Instance Name') && line.includes('_wled')) {
-          hostnames.push(match[1]);
+          hostnames.add(match[1]);
         }
       }
     });
 
     setTimeout(() => {
       browse.kill();
-      if (hostnames.length === 0) {
+      if (hostnames.size === 0) {
         ws.send(JSON.stringify({ type: 'devices', devices: [] }));
         return;
       }
 
+      const hostnameList = [...hostnames];
       let resolved = 0;
-      for (const hostname of hostnames) {
+      for (const hostname of hostnameList) {
         const resolve = spawn('dns-sd', ['-G', 'v4', `${hostname}.local.`]);
         resolve.stdout.on('data', (data: Buffer) => {
           const match = data.toString().match(/(\d+\.\d+\.\d+\.\d+)/);
-          if (match) {
-            devices.push({ name: hostname, ip: match[1] });
+          if (match && !devices.has(hostname)) {
+            devices.set(hostname, { name: hostname, ip: match[1] });
           }
         });
         setTimeout(() => {
           resolve.kill();
           resolved++;
-          if (resolved === hostnames.length) {
-            ws.send(JSON.stringify({ type: 'devices', devices }));
+          if (resolved === hostnameList.length) {
+            ws.send(JSON.stringify({ type: 'devices', devices: [...devices.values()] }));
           }
         }, 2000);
       }
