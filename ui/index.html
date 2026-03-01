@@ -43,6 +43,8 @@
     font-size: 13px;
   }
   button:hover { background: #1a4080; }
+  .transport-btn { font-size: 16px; padding: 4px 8px; line-height: 1; }
+  .transport-btn.active { background: #1a4080; border-color: #4a9eff; }
   #status {
     width: 10px; height: 10px;
     border-radius: 50%;
@@ -129,6 +131,10 @@
     <input type="number" id="fps-input" value="60" min="1" max="120">
   </div>
   <div class="header-group">
+    <button class="transport-btn" id="play-pause-btn" title="Play/Pause">&#9654;</button>
+    <button class="transport-btn" id="stop-btn" title="Stop">&#9632;</button>
+  </div>
+  <div class="header-group">
     <span id="status"></span>
     <label>WS</label>
   </div>
@@ -158,6 +164,8 @@
   const fpsDisplay = document.getElementById('fps-display');
   const effectSelect = document.getElementById('effect-select');
   const paramsContainer = document.getElementById('params-container');
+  const playPauseBtn = document.getElementById('play-pause-btn');
+  const stopBtn = document.getElementById('stop-btn');
   const canvas = document.getElementById('preview');
   const previewCtx = canvas.getContext('2d');
 
@@ -228,6 +236,14 @@
 
     if (msg.activeEffect) {
       effectSelect.value = msg.activeEffect;
+    }
+
+    // Update transport buttons
+    if (msg.playState) {
+      currentPlayState = msg.playState;
+      playPauseBtn.innerHTML = msg.playState === 'playing' ? '&#9646;&#9646;' : '&#9654;';
+      playPauseBtn.title = msg.playState === 'playing' ? 'Pause' : 'Play';
+      stopBtn.classList.toggle('active', msg.playState === 'stopped');
     }
 
     // Update params
@@ -341,6 +357,18 @@
       devicesDropdown.appendChild(opt);
     }
   }
+
+  function sendCmd(type) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type }));
+    }
+  }
+
+  let currentPlayState = 'playing';
+  playPauseBtn.addEventListener('click', () => {
+    sendCmd(currentPlayState === 'playing' ? 'pause' : 'play');
+  });
+  stopBtn.addEventListener('click', () => sendCmd('blackout'));
 
   devicesDropdown.addEventListener('change', () => {
     if (devicesDropdown.value) {

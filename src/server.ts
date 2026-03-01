@@ -46,6 +46,7 @@ export function createServer(opts: ServerOptions): Server {
       params: effectManager.activeEffect?.effect.params ?? [],
       paramValues: effectManager.activeParams,
       actualFps: renderLoop.actualFps,
+      playState: renderLoop.playState,
     };
     const msg = JSON.stringify(state);
     for (const ws of clients) {
@@ -66,6 +67,7 @@ export function createServer(opts: ServerOptions): Server {
       params: effectManager.activeEffect?.effect.params ?? [],
       paramValues: effectManager.activeParams,
       actualFps: renderLoop.actualFps,
+      playState: renderLoop.playState,
     };
     ws.send(JSON.stringify(state));
 
@@ -84,6 +86,18 @@ export function createServer(opts: ServerOptions): Server {
           case 'setConfig':
             onConfigChange(msg.config);
             break;
+          case 'play':
+            renderLoop.resume();
+            broadcastState();
+            break;
+          case 'pause':
+            renderLoop.pause();
+            broadcastState();
+            break;
+          case 'blackout':
+            renderLoop.blackout();
+            broadcastState();
+            break;
           case 'discover':
             discoverDevices(ws);
             break;
@@ -100,8 +114,11 @@ export function createServer(opts: ServerOptions): Server {
   (effectManager as any).onChange?.(() => broadcastState());
 
   function broadcastPreview(leds: Uint8Array): void {
-    previewThrottle++;
-    if (previewThrottle % 2 !== 0) return; // ~30fps if running at 60fps
+    // Only throttle during active playback
+    if (renderLoop.playState === 'playing') {
+      previewThrottle++;
+      if (previewThrottle % 2 !== 0) return; // ~30fps if running at 60fps
+    }
 
     for (const ws of clients) {
       if (ws.readyState === WebSocket.OPEN) {

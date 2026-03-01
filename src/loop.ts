@@ -11,12 +11,18 @@ export interface RenderLoopOptions {
   onFrame?(leds: Uint8Array): void;
 }
 
+export type PlayState = 'playing' | 'paused' | 'stopped';
+
 export interface RenderLoop {
   start(): void;
   stop(): void;
+  pause(): void;
+  resume(): void;
+  blackout(): void;
   setFps(fps: number): void;
   setLedCount(count: number): void;
   actualFps: number;
+  playState: PlayState;
 }
 
 export function createRenderLoop(opts: RenderLoopOptions): RenderLoop {
@@ -27,6 +33,7 @@ export function createRenderLoop(opts: RenderLoopOptions): RenderLoop {
   let timer: ReturnType<typeof setInterval> | null = null;
   let lastTime = process.hrtime.bigint();
   const startTime = process.hrtime.bigint();
+  let playState: PlayState = 'playing';
 
   // FPS tracking
   let frameCount = 0;
@@ -49,6 +56,8 @@ export function createRenderLoop(opts: RenderLoopOptions): RenderLoop {
       fpsAccum = 0;
     }
 
+    if (playState !== 'playing') return;
+
     fft.update(t);
 
     const ctx: EffectContext = {
@@ -70,6 +79,7 @@ export function createRenderLoop(opts: RenderLoopOptions): RenderLoop {
 
   function start(): void {
     if (timer) return;
+    playState = 'playing';
     lastTime = process.hrtime.bigint();
     timer = setInterval(tick, Math.round(1000 / targetFps));
   }
@@ -79,6 +89,21 @@ export function createRenderLoop(opts: RenderLoopOptions): RenderLoop {
       clearInterval(timer);
       timer = null;
     }
+  }
+
+  function pause(): void {
+    playState = 'paused';
+  }
+
+  function resume(): void {
+    playState = 'playing';
+  }
+
+  function blackout(): void {
+    playState = 'stopped';
+    leds.fill(0);
+    ddp.sendFrame(leds);
+    onFrame?.(leds);
   }
 
   function setFps(fps: number): void {
@@ -97,8 +122,12 @@ export function createRenderLoop(opts: RenderLoopOptions): RenderLoop {
   return {
     start,
     stop,
+    pause,
+    resume,
+    blackout,
     setFps,
     setLedCount,
     get actualFps() { return actualFps; },
+    get playState() { return playState; },
   };
 }
