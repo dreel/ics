@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ICS — Infinite Crystal Universe</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    min-height: 100vh;
+  }
+  header {
+    background: #16213e;
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid #0f3460;
+  }
+  header label { font-size: 13px; color: #8888aa; }
+  header input[type="text"], header input[type="number"] {
+    background: #0f3460;
+    border: 1px solid #1a4080;
+    color: #e0e0e0;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 13px;
+  }
+  header input[type="text"] { width: 140px; }
+  header input[type="number"] { width: 70px; }
+  .header-group { display: flex; align-items: center; gap: 6px; }
+  button {
+    background: #0f3460;
+    border: 1px solid #1a4080;
+    color: #e0e0e0;
+    padding: 4px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  button:hover { background: #1a4080; }
+  #status {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: #555;
+    display: inline-block;
+  }
+  #status.connected { background: #4caf50; }
+  #fps-display { font-size: 13px; color: #8888aa; margin-left: auto; }
+  main {
+    max-width: 900px;
+    margin: 20px auto;
+    padding: 0 20px;
+  }
+  .panel {
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .panel h3 { font-size: 14px; color: #8888aa; margin-bottom: 12px; }
+  select {
+    background: #0f3460;
+    border: 1px solid #1a4080;
+    color: #e0e0e0;
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 14px;
+    width: 100%;
+  }
+  .param-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 10px;
+  }
+  .param-row label { font-size: 13px; min-width: 80px; }
+  .param-row input[type="range"] { flex: 1; accent-color: #4a9eff; }
+  .param-row .param-value { font-size: 12px; color: #8888aa; min-width: 40px; text-align: right; }
+  .param-row input[type="checkbox"] { accent-color: #4a9eff; }
+  .param-row input[type="color"] {
+    width: 40px; height: 28px;
+    border: 1px solid #1a4080;
+    background: none;
+    cursor: pointer;
+  }
+  #preview-container {
+    width: 100%;
+    overflow: hidden;
+    border-radius: 6px;
+    border: 1px solid #0f3460;
+  }
+  #preview {
+    width: 100%;
+    height: 30px;
+    display: block;
+    image-rendering: pixelated;
+  }
+  #devices-dropdown {
+    display: none;
+    background: #0f3460;
+    border: 1px solid #1a4080;
+    color: #e0e0e0;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="header-group">
+    <label>IP</label>
+    <input type="text" id="ip-input" placeholder="WLED IP address">
+    <select id="devices-dropdown"></select>
+    <button id="scan-btn">Scan</button>
+  </div>
+  <div class="header-group">
+    <label>LEDs</label>
+    <input type="number" id="led-count" value="634" min="1" max="2000">
+  </div>
+  <div class="header-group">
+    <label>FPS</label>
+    <input type="number" id="fps-input" value="60" min="1" max="120">
+  </div>
+  <div class="header-group">
+    <span id="status"></span>
+    <label>WS</label>
+  </div>
+  <div id="fps-display">-- fps</div>
+</header>
+
+<main>
+  <div class="panel" id="preview-container">
+    <canvas id="preview" width="634" height="1"></canvas>
+  </div>
+
+  <div class="panel">
+    <h3>Effect</h3>
+    <select id="effect-select"></select>
+    <div id="params-container"></div>
+  </div>
+</main>
+
+<script>
+(function() {
+  const ipInput = document.getElementById('ip-input');
+  const ledCountInput = document.getElementById('led-count');
+  const fpsInput = document.getElementById('fps-input');
+  const scanBtn = document.getElementById('scan-btn');
+  const devicesDropdown = document.getElementById('devices-dropdown');
+  const statusDot = document.getElementById('status');
+  const fpsDisplay = document.getElementById('fps-display');
+  const effectSelect = document.getElementById('effect-select');
+  const paramsContainer = document.getElementById('params-container');
+  const canvas = document.getElementById('preview');
+  const previewCtx = canvas.getContext('2d');
+
+  let ws = null;
+  let currentParams = [];
+  let currentParamValues = {};
+  let ledCount = 634;
+
+  function connect() {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(`${proto}//${location.host}`);
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => {
+      statusDot.classList.add('connected');
+    };
+
+    ws.onclose = () => {
+      statusDot.classList.remove('connected');
+      setTimeout(connect, 1000);
+    };
+
+    ws.onmessage = (e) => {
+      if (e.data instanceof ArrayBuffer) {
+        renderPreview(new Uint8Array(e.data));
+        return;
+      }
+
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'state') {
+        updateState(msg);
+      } else if (msg.type === 'devices') {
+        showDevices(msg.devices);
+      }
+    };
+  }
+
+  function renderPreview(leds) {
+    const pixelCount = leds.length / 3;
+    if (canvas.width !== pixelCount) {
+      canvas.width = pixelCount;
+      ledCount = pixelCount;
+    }
+    const imageData = previewCtx.createImageData(pixelCount, 1);
+    for (let i = 0; i < pixelCount; i++) {
+      imageData.data[i * 4] = leds[i * 3];
+      imageData.data[i * 4 + 1] = leds[i * 3 + 1];
+      imageData.data[i * 4 + 2] = leds[i * 3 + 2];
+      imageData.data[i * 4 + 3] = 255;
+    }
+    previewCtx.putImageData(imageData, 0, 0);
+  }
+
+  function updateState(msg) {
+    fpsDisplay.textContent = msg.actualFps + ' fps';
+
+    // Update effect list
+    const prevSelected = effectSelect.value;
+    if (effectSelect.options.length !== msg.effects.length) {
+      effectSelect.innerHTML = '';
+      for (const eff of msg.effects) {
+        const opt = document.createElement('option');
+        opt.value = eff.name;
+        opt.textContent = eff.name;
+        effectSelect.appendChild(opt);
+      }
+    }
+
+    if (msg.activeEffect) {
+      effectSelect.value = msg.activeEffect;
+    }
+
+    // Update params
+    currentParams = msg.params;
+    currentParamValues = msg.paramValues;
+    renderParams();
+  }
+
+  function renderParams() {
+    paramsContainer.innerHTML = '';
+    for (const p of currentParams) {
+      const row = document.createElement('div');
+      row.className = 'param-row';
+
+      const label = document.createElement('label');
+      label.textContent = p.label;
+      row.appendChild(label);
+
+      if (p.type === 'bool') {
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = !!currentParamValues[p.key];
+        cb.addEventListener('change', () => {
+          sendParam(p.key, cb.checked);
+        });
+        row.appendChild(cb);
+      } else if (p.type === 'color') {
+        const color = document.createElement('input');
+        color.type = 'color';
+        const val = currentParamValues[p.key] || 0;
+        color.value = '#' + Math.round(val).toString(16).padStart(6, '0');
+        color.addEventListener('input', () => {
+          const hex = color.value.substring(1);
+          sendParam(p.key, parseInt(hex, 16));
+        });
+        row.appendChild(color);
+      } else {
+        const range = document.createElement('input');
+        range.type = 'range';
+        range.min = p.min ?? 0;
+        range.max = p.max ?? 1;
+        range.step = p.type === 'int' ? '1' : '0.01';
+        range.value = currentParamValues[p.key] ?? p.default;
+
+        const valSpan = document.createElement('span');
+        valSpan.className = 'param-value';
+        valSpan.textContent = Number(range.value).toFixed(p.type === 'int' ? 0 : 2);
+
+        range.addEventListener('input', () => {
+          const v = p.type === 'int' ? parseInt(range.value) : parseFloat(range.value);
+          valSpan.textContent = v.toFixed(p.type === 'int' ? 0 : 2);
+          sendParam(p.key, v);
+        });
+
+        row.appendChild(range);
+        row.appendChild(valSpan);
+      }
+
+      paramsContainer.appendChild(row);
+    }
+  }
+
+  function sendParam(key, value) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'setParam', key, value }));
+    }
+  }
+
+  effectSelect.addEventListener('change', () => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'selectEffect', name: effectSelect.value }));
+    }
+  });
+
+  function sendConfig() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'setConfig',
+        config: {
+          ip: ipInput.value || undefined,
+          ledCount: parseInt(ledCountInput.value) || undefined,
+          fps: parseInt(fpsInput.value) || undefined,
+        }
+      }));
+    }
+  }
+
+  ipInput.addEventListener('change', sendConfig);
+  ledCountInput.addEventListener('change', sendConfig);
+  fpsInput.addEventListener('change', sendConfig);
+
+  scanBtn.addEventListener('click', () => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      scanBtn.textContent = 'Scanning...';
+      ws.send(JSON.stringify({ type: 'discover' }));
+    }
+  });
+
+  function showDevices(devices) {
+    scanBtn.textContent = 'Scan';
+    if (devices.length === 0) {
+      devicesDropdown.style.display = 'none';
+      return;
+    }
+    devicesDropdown.style.display = 'inline-block';
+    devicesDropdown.innerHTML = '<option value="">Select device...</option>';
+    for (const d of devices) {
+      const opt = document.createElement('option');
+      opt.value = d.ip;
+      opt.textContent = d.name + ' (' + d.ip + ')';
+      devicesDropdown.appendChild(opt);
+    }
+  }
+
+  devicesDropdown.addEventListener('change', () => {
+    if (devicesDropdown.value) {
+      ipInput.value = devicesDropdown.value;
+      sendConfig();
+    }
+  });
+
+  connect();
+})();
+</script>
+</body>
+</html>
