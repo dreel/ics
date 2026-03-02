@@ -238,6 +238,12 @@
       effectSelect.value = msg.activeEffect;
     }
 
+    // Sync LED count from server (reflects auto-detected values)
+    if (msg.ledCount !== undefined) {
+      ledCountInput.value = msg.ledCount;
+      ledCount = msg.ledCount;
+    }
+
     // Update transport buttons
     if (msg.playState) {
       currentPlayState = msg.playState;
@@ -318,22 +324,21 @@
     }
   });
 
-  function sendConfig() {
+  function sendConfig(config) {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: 'setConfig',
-        config: {
-          ip: ipInput.value || undefined,
-          ledCount: parseInt(ledCountInput.value) || undefined,
-          fps: parseInt(fpsInput.value) || undefined,
-        }
-      }));
+      ws.send(JSON.stringify({ type: 'setConfig', config }));
     }
   }
 
-  ipInput.addEventListener('change', sendConfig);
-  ledCountInput.addEventListener('change', sendConfig);
-  fpsInput.addEventListener('change', sendConfig);
+  ipInput.addEventListener('change', () => {
+    sendConfig({ ip: ipInput.value || undefined });
+  });
+  ledCountInput.addEventListener('change', () => {
+    sendConfig({ ledCount: parseInt(ledCountInput.value) || undefined });
+  });
+  fpsInput.addEventListener('change', () => {
+    sendConfig({ fps: parseInt(fpsInput.value) || undefined });
+  });
 
   scanBtn.addEventListener('click', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -373,7 +378,7 @@
   devicesDropdown.addEventListener('change', () => {
     if (devicesDropdown.value) {
       ipInput.value = devicesDropdown.value;
-      sendConfig();
+      sendConfig({ ip: devicesDropdown.value });
     }
   });
 

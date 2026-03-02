@@ -17,6 +17,7 @@ export interface Server {
   start(): void;
   stop(): void;
   broadcastPreview(leds: Uint8Array): void;
+  broadcastState(): void;
 }
 
 export function createServer(opts: ServerOptions): Server {
@@ -38,8 +39,8 @@ export function createServer(opts: ServerOptions): Server {
 
   const wss = new WebSocketServer({ server: httpServer });
 
-  function broadcastState(): void {
-    const state = {
+  function getState() {
+    return {
       type: 'state',
       effects: effectManager.getEffectList(),
       activeEffect: effectManager.activeEffect?.name ?? null,
@@ -47,8 +48,12 @@ export function createServer(opts: ServerOptions): Server {
       paramValues: effectManager.activeParams,
       actualFps: renderLoop.actualFps,
       playState: renderLoop.playState,
+      ledCount: renderLoop.ledCount,
     };
-    const msg = JSON.stringify(state);
+  }
+
+  function broadcastState(): void {
+    const msg = JSON.stringify(getState());
     for (const ws of clients) {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(msg);
@@ -60,16 +65,7 @@ export function createServer(opts: ServerOptions): Server {
     clients.add(ws);
 
     // Send initial state
-    const state = {
-      type: 'state',
-      effects: effectManager.getEffectList(),
-      activeEffect: effectManager.activeEffect?.name ?? null,
-      params: effectManager.activeEffect?.effect.params ?? [],
-      paramValues: effectManager.activeParams,
-      actualFps: renderLoop.actualFps,
-      playState: renderLoop.playState,
-    };
-    ws.send(JSON.stringify(state));
+    ws.send(JSON.stringify(getState()));
 
     ws.on('message', (data) => {
       try {
@@ -186,5 +182,5 @@ export function createServer(opts: ServerOptions): Server {
     httpServer.close();
   }
 
-  return { start, stop, broadcastPreview };
+  return { start, stop, broadcastPreview, broadcastState };
 }

@@ -22,6 +22,7 @@ export interface RenderLoop {
   setFps(fps: number): void;
   setLedCount(count: number): void;
   actualFps: number;
+  ledCount: number;
   playState: PlayState;
 }
 
@@ -128,6 +129,7 @@ export function createRenderLoop(opts: RenderLoopOptions): RenderLoop {
     setFps,
     setLedCount,
     get actualFps() { return actualFps; },
+    get ledCount() { return ledCount; },
     get playState() { return playState; },
   };
 }

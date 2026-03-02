@@ -4,22 +4,35 @@ import { DDP_PORT, MAX_DDP_PAYLOAD } from './types.js';
 export interface DdpClient {
   sendFrame(leds: Uint8Array): void;
   setTarget(ip: string): void;
+  setLedCount(count: number): void;
   close(): void;
 }
 
-export function createDdpClient(ip: string, ledCount: number): DdpClient {
+export function createDdpClient(ip: string, initialLedCount: number): DdpClient {
   const socket = dgram.createSocket('udp4');
   let targetIp = ip;
   let seq = 1;
 
-  // Pre-allocate packet buffers
-  const totalBytes = ledCount * 3;
-  const packetCount = Math.ceil(totalBytes / MAX_DDP_PAYLOAD);
-  const packets: Buffer[] = [];
-  for (let i = 0; i < packetCount; i++) {
-    const offset = i * MAX_DDP_PAYLOAD;
-    const payloadLen = Math.min(MAX_DDP_PAYLOAD, totalBytes - offset);
-    packets.push(Buffer.alloc(10 + payloadLen));
+  // Mutable packet state — rebuilt on setLedCount
+  let totalBytes = initialLedCount * 3;
+  let packetCount = Math.ceil(totalBytes / MAX_DDP_PAYLOAD);
+  let packets: Buffer[] = allocatePackets(totalBytes);
+
+  function allocatePackets(total: number): Buffer[] {
+    const count = Math.ceil(total / MAX_DDP_PAYLOAD);
+    const bufs: Buffer[] = [];
+    for (let i = 0; i < count; i++) {
+      const offset = i * MAX_DDP_PAYLOAD;
+      const payloadLen = Math.min(MAX_DDP_PAYLOAD, total - offset);
+      bufs.push(Buffer.alloc(10 + payloadLen));
+    }
+    return bufs;
+  }
+
+  function setLedCount(count: number): void {
+    totalBytes = count * 3;
+    packetCount = Math.ceil(totalBytes / MAX_DDP_PAYLOAD);
+    packets = allocatePackets(totalBytes);
   }
 
   function sendFrame(leds: Uint8Array): void {
@@ -66,5 +79,5 @@ export function createDdpClient(ip: string, ledCount: number): DdpClient {
     } catch {}
   }
 
-  return { sendFrame, setTarget, close };
+  return { sendFrame, setTarget, setLedCount, close };
 }
