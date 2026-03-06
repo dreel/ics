@@ -1,6 +1,8 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import dgram from 'node:dgram';
+import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { EffectManager } from './effectLoader.js';
@@ -17,6 +19,7 @@ export interface Server {
   start(): void;
   stop(): void;
   broadcastPreview(leds: Uint8Array): void;
+  broadcastGeq(bands: Float32Array, lastPacketTime: number): void;
   broadcastState(): void;
 }
 
@@ -97,6 +100,9 @@ export function createServer(opts: ServerOptions): Server {
           case 'discover':
             discoverDevices(ws);
             break;
+          case 'testAudioSync':
+            sendTestAudioSync(ws);
+            break;
         }
       } catch {}
     });
@@ -119,6 +125,24 @@ export function createServer(opts: ServerOptions): Server {
     for (const ws of clients) {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(leds, { binary: true });
+      }
+    }
+  }
+
+  let geqThrottle = 0;
+
+  function broadcastGeq(bands: Float32Array, lastPacketTime: number): void {
+    geqThrottle++;
+    if (geqThrottle % 3 !== 0) return; // ~20fps at 60fps render
+
+    const msg = JSON.stringify({
+      type: 'geq',
+      bands: Array.from(bands),
+      lastPacketTime,
+    });
+    for (const ws of clients) {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(msg);
       }
     }
   }
@@ -169,6 +193,69 @@ export function createServer(opts: ServerOptions): Server {
     }, 3000);
   }
 
+  let testAudioActive = false;
+
+  function sendTestAudioSync(ws: WebSocket): void {
+    if (testAudioActive) return;
+    testAudioActive = true;
+
+    const sock = dgram.createSocket('udp4');
+    sock.bind(() => {
+      sock.setMulticastTTL(32);
+      sock.setBroadcast(true);
+      // Pick the first non-internal IPv4 interface for multicast
+      const ifaces = os.networkInterfaces();
+      for (const addrs of Object.values(ifaces)) {
+        for (const addr of addrs ?? []) {
+          if (addr.family === 'IPv4' && !addr.internal) {
+            try { sock.setMulticastInterface(addr.address); } catch {}
+            break;
+          }
+        }
+      }
+
+      const DURATION = 4000; // ms
+      const INTERVAL = 20;   // ms
+      const TOTAL = DURATION / INTERVAL;
+      let i = 0;
+
+      ws.send(JSON.stringify({ type: 'testAudioSync', status: 'started' }));
+
+      const timer = setInterval(() => {
+        const t = i / TOTAL; // 0..1 progress
+        const buf = Buffer.alloc(44);
+        // Header '00002\0'
+        buf.write('00002', 0, 'ascii');
+        buf[5] = 0;
+        // Sweep a peak across the 16 GEQ bands
+        const peakBand = t * 15;
+        for (let b = 0; b < 16; b++) {
+          const dist = Math.abs(b - peakBand);
+          const val = Math.max(0, 1 - dist / 2.5);
+          buf[18 + b] = Math.floor(val * 254);
+        }
+        // sampleRaw / sampleSmth (float32 LE)
+        const level = buf[18 + Math.round(peakBand)] / 254;
+        buf.writeFloatLE(level * 1000, 8);
+        buf.writeFloatLE(level * 800, 12);
+        // samplePeak
+        buf[16] = level > 0.9 ? 1 : 0;
+        // FFT_Magnitude, FFT_MajorPeak
+        buf.writeFloatLE(level * 500, 36);
+        buf.writeFloatLE(63 * Math.pow(2, peakBand / 2), 40);
+
+        sock.send(buf, 0, 44, 11988, '239.0.0.1');
+        i++;
+        if (i >= TOTAL) {
+          clearInterval(timer);
+          testAudioActive = false;
+          sock.close();
+          ws.send(JSON.stringify({ type: 'testAudioSync', status: 'done' }));
+        }
+      }, INTERVAL);
+    });
+  }
+
   function start(): void {
     httpServer.listen(port, () => {
       console.log(`UI: http://localhost:${port}`);
@@ -182,5 +269,5 @@ export function createServer(opts: ServerOptions): Server {
     httpServer.close();
   }
 
-  return { start, stop, broadcastPreview, broadcastState };
+  return { start, stop, broadcastPreview, broadcastGeq, broadcastState };
 }

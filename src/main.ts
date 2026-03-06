@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { DEFAULT_LED_COUNT, DEFAULT_TARGET_FPS } from './types.js';
 import { createDdpClient } from './ddp.js';
-import { createFftStub } from './fft.js';
+import { createAudioSync } from './audioSync.js';
 import { createRenderLoop, type RenderLoop } from './loop.js';
 import { createEffectManager } from './effectLoader.js';
 import { createServer } from './server.js';
@@ -42,7 +42,7 @@ async function main() {
   }
 
   const ddp = createDdpClient(WLED_IP, LED_COUNT);
-  const fft = createFftStub();
+  const fft = createAudioSync();
   const effectsDir = path.resolve(import.meta.dirname, '..', 'effects');
   const effectManager = createEffectManager(effectsDir, LED_COUNT);
 
@@ -52,7 +52,10 @@ async function main() {
     ddp,
     fft,
     getActiveEffect: () => effectManager.getActive(),
-    onFrame: (leds) => server.broadcastPreview(leds),
+    onFrame: (leds) => {
+      server.broadcastPreview(leds);
+      server.broadcastGeq(fft.data.geqBands, fft.lastPacketTime);
+    },
   });
 
   // Auto-detect LED count from WLED device at startup
@@ -107,6 +110,7 @@ async function main() {
     renderLoop.stop();
     server.stop();
     effectManager.stop();
+    fft.close();
     ddp.close();
     process.exit(0);
   });

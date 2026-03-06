@@ -8,6 +8,7 @@ export interface Color {
 // FFT data passed into every effect update — stubbed initially
 export interface FFTData {
   bins: Float32Array;
+  geqBands: Float32Array;
   bassEnergy: number;
   midEnergy: number;
   highEnergy: number;

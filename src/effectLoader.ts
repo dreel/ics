@@ -86,6 +86,7 @@ export function createEffectManager(effectsDir: string, ledCount: number): Effec
       leds: dummyLeds,
       fft: {
         bins: new Float32Array(512),
+        geqBands: new Float32Array(16),
         bassEnergy: 0, midEnergy: 0, highEnergy: 0,
         beatDetected: false,
       },
