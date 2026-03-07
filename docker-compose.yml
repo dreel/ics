@@ -1,0 +1,11 @@
+services:
+  ics:
+    build: .
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      - WLED_IP=${WLED_IP:-}
+      - LED_COUNT=${LED_COUNT:-150}
+      - PORT=${PORT:-3000}
+    volumes:
+      - ./effects:/app/effects

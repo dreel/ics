@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import dgram from 'node:dgram';
 import os from 'node:os';
-import { spawn } from 'node:child_process';
+import mdns from 'multicast-dns';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { EffectManager } from './effectLoader.js';
 import type { RenderLoop } from './loop.js';
@@ -152,44 +152,33 @@ export function createServer(opts: ServerOptions): Server {
 
   function discoverDevices(ws: WebSocket): void {
     const devices = new Map<string, { name: string; ip: string }>();
-    const browse = spawn('dns-sd', ['-B', '_wled._tcp', 'local.']);
-    const hostnames = new Set<string>();
+    const m = mdns();
 
-    browse.stdout.on('data', (data: Buffer) => {
-      const lines = data.toString().split('\n');
-      for (const line of lines) {
-        const match = line.match(/\s+(\S+)\s*$/);
-        if (match && !line.includes('Instance Name') && line.includes('_wled')) {
-          hostnames.add(match[1]);
+    const wledHosts = new Set<string>();
+
+    m.on('response', (response: any) => {
+      const all = [...response.answers, ...response.additionals];
+      for (const answer of all) {
+        if (answer.type === 'PTR' && answer.name === '_wled._tcp.local') {
+          wledHosts.add(answer.data);
+        }
+        if (answer.type === 'SRV' && wledHosts.has(answer.name)) {
+          wledHosts.add(answer.data?.target);
+        }
+      }
+      for (const answer of all) {
+        if (answer.type === 'A' && wledHosts.has(answer.name) && !devices.has(answer.name)) {
+          const name = answer.name.replace(/\.local$/, '');
+          devices.set(answer.name, { name, ip: answer.data });
         }
       }
     });
 
-    setTimeout(() => {
-      browse.kill();
-      if (hostnames.size === 0) {
-        ws.send(JSON.stringify({ type: 'devices', devices: [] }));
-        return;
-      }
+    m.query({ questions: [{ name: '_wled._tcp.local', type: 'PTR' }] });
 
-      const hostnameList = [...hostnames];
-      let resolved = 0;
-      for (const hostname of hostnameList) {
-        const resolve = spawn('dns-sd', ['-G', 'v4', `${hostname}.local.`]);
-        resolve.stdout.on('data', (data: Buffer) => {
-          const match = data.toString().match(/(\d+\.\d+\.\d+\.\d+)/);
-          if (match && !devices.has(hostname)) {
-            devices.set(hostname, { name: hostname, ip: match[1] });
-          }
-        });
-        setTimeout(() => {
-          resolve.kill();
-          resolved++;
-          if (resolved === hostnameList.length) {
-            ws.send(JSON.stringify({ type: 'devices', devices: [...devices.values()] }));
-          }
-        }, 2000);
-      }
+    setTimeout(() => {
+      m.destroy();
+      ws.send(JSON.stringify({ type: 'devices', devices: [...devices.values()] }));
     }, 3000);
   }
 

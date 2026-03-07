@@ -9,9 +9,11 @@
   },
   "dependencies": {
     "chokidar": "^5.0.0",
+    "multicast-dns": "^7.2.5",
     "ws": "^8.19.0"
   },
   "devDependencies": {
+    "@types/multicast-dns": "^7.2.4",
     "@types/node": "^25.3.3",
     "@types/ws": "^8.18.1",
     "tsx": "^4.21.0",
